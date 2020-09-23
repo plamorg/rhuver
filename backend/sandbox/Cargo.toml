@@ -1,18 +1,12 @@
 [package]
-name = "rhuver"
+name = "sandbox"
 version = "0.1.0"
 authors = ["virchau13 <virchau13@mail.hexular.net>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-name = "rhuver"
-path = "src/lib.rs"
-
-[[bin]]
-name = "rhuver" 
-path = "src/bin/main.rs"
-
 [dependencies]
-actix-web = "3"
+seccomp-sys = "0.1.3"
+libc = "0.2"
+nix = "0.18.0"
