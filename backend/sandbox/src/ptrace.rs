@@ -41,16 +41,28 @@ fn track_process_loop(pid: Pid, state: &mut ProcState) -> Result<(), KillReason>
         syscall(pid, None);
         state.verdict = wait_with_sig()?;
         if state.verdict != Verdict::Running { return Ok(()); }
+        regs = getregs(pid)?;
         match syscall_nr as i64 {
-            libc::SYS_brk => {
-                if last_brk == 0 && regs.rbx != 0 {
-                    return Err(KillReason::BrkWithoutInitialCall);
+            // filter if allocation worked
+            libc::SYS_brk if (regs.rax as i64) >= 0 => {
+                if last_brk == 0 {
+                    if regs.rdi != 0 {
+                        return Err(KillReason::BrkWithoutInitialCall);
+                    }
+                    last_brk = regs.rdi;
                 }
+                // safe because of 2's complement
+                state.max_mem += regs.rdi - last_brk;
+                last_brk = regs.rdi;
             },
-            libc::SYS_mmap => {
-                // TODO
+            libc::SYS_mmap if (regs.rax as i64) >= 0 => {
+                state.max_mem += regs.rdi;
+            },
+            libc::SYS_mremap if (regs.rax as i64) >= 0 => {
+                // safe because of 2's complement
+                state.max_mem += regs.rsi - regs.rdi;
             }
         }
     };
-    // TODO
+    // TODO: rlimit
 }
