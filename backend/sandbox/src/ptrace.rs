@@ -61,6 +61,9 @@ fn track_process_loop(pid: Pid, state: &mut ProcState) -> Result<(), KillReason>
             libc::SYS_mremap if (regs.rax as i64) >= 0 => {
                 // safe because of 2's complement
                 state.max_mem += regs.rsi - regs.rdi;
+            },
+            libc::SYS_munmap if (regs.rax as i64) >= 0 => {
+                state.max_mem -= regs.rdi;
             }
         }
     };

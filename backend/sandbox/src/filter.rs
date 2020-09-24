@@ -5,7 +5,7 @@ use nix::libc::*;
 
 // Wrapper around C function invocations that return < 0 on error.
 
-const ALLOWED_SYSCALLS_LENGTH: usize = 69;
+const ALLOWED_SYSCALLS_LENGTH: usize = 68;
 const ALLOWED_SYSCALLS: [i64; ALLOWED_SYSCALLS_LENGTH] = [
     // file descriptor stuff
     SYS_write,
@@ -73,9 +73,9 @@ const ALLOWED_SYSCALLS: [i64; ALLOWED_SYSCALLS_LENGTH] = [
     SYS_brk,
     SYS_mprotect,
     SYS_madvise,
-    SYS_mbind,
+    /* looks very complicated to track so i don't want to */
+    // SYS_mbind,
     SYS_mincore,
-
     
     // misc
     SYS_arch_prctl,
@@ -84,11 +84,8 @@ const ALLOWED_SYSCALLS: [i64; ALLOWED_SYSCALLS_LENGTH] = [
     SYS_execve,
     SYS_sysinfo,
     SYS_getrandom,
-    SYS_rt_sigaction,
-    SYS_rt_sigprocmask,
     SYS_set_robust_list,
     SYS_set_tid_address,
-    SYS_sigaltstack,
     SYS_uname,
 ];
 
