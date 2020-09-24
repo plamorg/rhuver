@@ -1,66 +1,56 @@
-use nix::sys::ptrace::*;
-use nix::unistd::Pid;
-use nix::sys::wait::*;
-use nix::libc;
-use std::error::Error;
-use std::convert::From;
-use nix::sys::signal::Signal;
+use nix::{sys::{ptrace::*, wait::*, signal::{kill, Signal}}, unistd::Pid, libc};
+use crate::proc_data::*;
 
 pub fn trace_me(){
     traceme();
 }
 
-#[derive(PartialEq, Eq, Copy, Clone)]
-pub enum Verdict {
-    RuntimeError(Signal),
-    TimeLimitExceeded,
-    MemoryLimitExceeded,
-    Ok,
-    Running
-}
-
-#[derive(PartialEq, Eq, Copy, Clone)]
-pub struct ProcState {
-    verdict: Verdict,
-    max_time: u64,
-    max_mem: u64,
-}
-
-fn wait_with_sig() -> Result<Verdict, String> {
-    match wait() { 
-        Err(s) => Err(s.to_string()),
-        Ok(stat) => 
-            match stat {
-                WaitStatus::Exited(_, code) => Ok(Verdict::Ok),
-                WaitStatus::Signaled(_, sig, _) => Ok(Verdict::RuntimeError(sig)),
-                _ => Ok(Verdict::Running)
-            }
+fn wait_with_sig() -> Result<Verdict, nix::Error> {
+    match wait()? {
+        WaitStatus::Exited(_, code) => match code {
+            EXIT_CODE_FAILED_EXEC => Ok(Verdict::FailedExec),
+            _ => Ok(Verdict::Ok)
+        },
+        WaitStatus::Signaled(_, sig, _) => Ok(Verdict::RuntimeError(sig)),
+        _ => Ok(Verdict::Running)
     }
 }
 
-pub fn track_memory(pid: Pid) -> Result<ProcState, String> {
-    let mut state = ProcState {
-        verdict: Verdict::Ok,
-        max_time: 0,
+pub fn track_process(pid: Pid) -> ProcState {
+    let state = ProcState {
+        verdict: Verdict::Running,
         max_mem: 0,
+        max_time: 0
     };
+    if let Err(e) = track_process_loop(pid, &mut state) {
+        kill(pid, Signal::SIGKILL);
+        state.verdict = Verdict::Killed(e);
+    }
+    state
+}
+
+fn track_process_loop(pid: Pid, state: &mut ProcState) -> Result<(), KillReason> {
     let last_brk: u64 = 0;
     loop {
         // syscall has been entered
-        if wait_with_sig()? { return Ok(state); }
-        let regs = match getregs(pid) { Err(s) => Err(s.to_string()), Ok(r) => Ok(r) }?;
+        state.verdict = wait_with_sig()?;
+        if state.verdict != Verdict::Running { return Ok(()); }
+        let regs = getregs(pid)?;
         let syscall_nr = regs.orig_rax;
         // wait for exit
         syscall(pid, None);
-        if wait_with_sig()? { return Ok(state); }
+        state.verdict = wait_with_sig()?;
+        if state.verdict != Verdict::Running { return Ok(()); }
         match syscall_nr as i64 {
             libc::SYS_brk => {
                 if last_brk == 0 && regs.rbx != 0 {
-                    return Err("called brk() without initial query".to_string());
+                    return Err(KillReason::BrkWithoutInitialCall);
                 }
             },
             libc::SYS_mmap => {
+                // TODO
             }
         }
     };
+    // TODO
 }

@@ -1,33 +1,32 @@
-extern crate libc;
 mod filter;
+mod proc_data;
 mod ptrace;
+use proc_data::*;
 
 use nix::unistd::{fork, ForkResult};
 use std::os::unix::process::CommandExt;
-use std::process::Command;
+use std::process::{exit, Command};
 
+/* Runs the arguments given as a compiler - 3 second maximum time, no maximum memory. */
 pub fn compile(bin: String, args: Vec<String>) {
+    // TODO
 }
 
-pub fn exec(bin: String, args: Vec<String>) -> Result<ExecRes, String> {
+/* Runs the arguments given as a submission with `time_limit` and `mem_limit`. */
+pub fn exec(bin: String, args: Vec<String>, time_limit: u64, mem_limit: u64) -> Result<ProcState, String> {
     match fork() {
         Ok(ForkResult::Parent { child }) => {
-            ptrace::track_memory(child);
+            let result = ptrace::track_process(child);
+            // TODO
         },
         Ok(ForkResult::Child) => {
             ptrace::trace_me();
             filter::filter_syscalls();
-            Command::new(bin)
+            let err = Command::new(bin)
                 .args(args)
                 .exec();
+            // definitely errored
+            exit(EXIT_CODE_FAILED_EXEC);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
     }
 }
