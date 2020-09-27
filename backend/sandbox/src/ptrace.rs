@@ -5,13 +5,17 @@ pub fn trace_me() -> Result<(), nix::Error> {
     traceme()
 }
 
-fn wait_with_sig() -> Result<Verdict, nix::Error> {
+pub fn wait_with_sig() -> Result<Verdict, nix::Error> {
     match wait()? {
         WaitStatus::Exited(_, code) => match code {
             EXIT_CODE_FAILED_EXEC => Ok(Verdict::FailedExec),
-            _ => Ok(Verdict::Ok)
+            0 => Ok(Verdict::Ok),
+            _ => Ok(Verdict::Nzec(code))
         },
-        WaitStatus::Signaled(_, sig, _) => Ok(Verdict::RuntimeError(sig)),
+        WaitStatus::Signaled(_, sig, _) => match sig {
+            Signal::SIGXCPU => Ok(Verdict::TimeLimitExceeded),
+            _ => Ok(Verdict::RuntimeError(sig)),
+        },
         _ => Ok(Verdict::Running)
     }
 }
@@ -45,6 +49,8 @@ pub fn track_process(pid: Pid) -> ProcState {
 }
 
 fn track_process_loop(pid: Pid, state: &mut ProcState) -> Result<(), KillReason> {
+    /* state.verdict = wait_with_sig()?;
+    if state.verdict != Verdict::Running { return Ok(()); } TODO PTRACE_O_EXITKILL*/
     let mut last_brk: u64 = 0;
     loop {
         // syscall has been entered

@@ -47,6 +47,8 @@ pub enum Verdict {
     MemoryLimitExceeded,
     Killed(KillReason),
     FailedExec,
+    // non-zero exit code
+    Nzec(i32),
     Ok,
     Running
 }
