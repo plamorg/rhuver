@@ -1,8 +1,7 @@
 /* Links parent and child process together through pipes. */
 
 use nix::{unistd::{close, pipe, dup2, write, read}, fcntl::{open, OFlag}, sys::stat::Mode};
-use std::os::unix::io::{RawFd, AsRawFd};
-use std::io::Write;
+use std::os::unix::io::RawFd;
 use crate::common::*;
 
 #[allow(dead_code)]
@@ -33,4 +32,8 @@ pub fn write_side(fds: (RawFd, RawFd)) -> RawFd {
 
 pub fn read_side(fds: (RawFd, RawFd)) -> RawFd {
     fds.0
+}
+
+pub fn close_side(fd: RawFd)  -> Result<(), String> {
+    error_convert(close(fd))
 }

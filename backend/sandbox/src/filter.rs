@@ -5,7 +5,7 @@ use nix::libc::*;
 
 // Wrapper around C function invocations that return < 0 on error.
 
-const ALLOWED_SYSCALLS_LENGTH: usize = 65;
+const ALLOWED_SYSCALLS_LENGTH: usize = 66;
 const ALLOWED_SYSCALLS: [i64; ALLOWED_SYSCALLS_LENGTH] = [
     // file descriptor stuff
     SYS_write,
@@ -87,14 +87,15 @@ const ALLOWED_SYSCALLS: [i64; ALLOWED_SYSCALLS_LENGTH] = [
     SYS_set_robust_list,
     SYS_set_tid_address,
     SYS_uname,
+    SYS_wait4,
 ];
 
-pub fn filter_syscalls() -> Result<(), String> {
+pub fn filter_syscalls(extra_allowed: &[i64]) -> Result<(), String> {
     let ctx = unsafe { seccomp_init(SCMP_ACT_ERRNO(libc::EPERM as u32)) };
     if ctx.is_null() {
         return Err("failed seccomp_init".to_string());
     }
-    for syscall in ALLOWED_SYSCALLS.iter() {
+    for syscall in ALLOWED_SYSCALLS.iter().chain(extra_allowed.iter()) {
         if unsafe { seccomp_rule_add(ctx, SCMP_ACT_ALLOW, *syscall as i32, 0) } < 0 {
             return Err(format!("failed to allow syscall nr {}", *syscall));
         }
