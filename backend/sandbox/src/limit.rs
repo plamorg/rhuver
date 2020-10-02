@@ -9,7 +9,10 @@ pub fn limit_memtime(max_mem: u64, max_sec: u64) -> Result<(), String> {
 }
 
 fn limit_memtime_raw(max_mem: u64, max_sec: u64) -> io::Result<()> {
+    // limit memory
     setrlimit(Resource::AS, max_mem, max_mem)?;
+    // limit core dump
     setrlimit(Resource::CORE, 0, 0)?;
+    // limit cpu
     setrlimit(Resource::CPU, max_sec, max_sec + 1)
 }

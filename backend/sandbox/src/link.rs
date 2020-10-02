@@ -1,6 +1,6 @@
 /* Links parent and child process together through pipes. */
 
-use nix::{unistd::{close, pipe, dup2, write, read}, fcntl::{open, OFlag}, sys::stat::Mode};
+use nix::{unistd::{close, pipe, pipe2, dup2, write, read}, fcntl::{open, OFlag}, sys::stat::Mode};
 use std::os::unix::io::RawFd;
 use crate::common::*;
 
@@ -16,6 +16,10 @@ pub fn reroute_link(to: RawFd, from: RawFd) -> Result<RawFd, String> {
 /* Initiates a parent <-> child communication link. */
 pub fn init_link() -> Result<(RawFd, RawFd), String> {
     error_convert(pipe())
+}
+
+pub fn init_link_flag(flags: OFlag) -> Result<(RawFd, RawFd), String> {
+    error_convert(pipe2(flags))
 }
 
 pub fn write_link(conn: RawFd, msg: &[u8]) -> Result<usize, String> {

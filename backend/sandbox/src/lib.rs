@@ -1,38 +1,45 @@
 mod filter;
 mod proc_data;
-mod ptrace;
+mod trace;
 mod limit;
 mod link;
 mod common;
 use proc_data::*;
+use common::error_convert;
 
-use nix::{unistd::{fork, ForkResult, execve}, libc::{SYS_vfork, SYS_fork, SYS_clone}};
-use std::{time::Instant, os::unix::{io::RawFd, process::CommandExt}, process::{exit, Command}, ffi::{CString, CStr}};
+use nix::{unistd::{fork, ForkResult, execve}, libc::{SYS_vfork, SYS_fork, SYS_clone}, fcntl::OFlag};
+use std::{time::Instant, os::unix::io::RawFd, process::exit, ffi::{CString, CStr}, convert::Infallible};
 
-fn limit_myself(mem_limit: u64, time_limit: u64) -> Result<(), String> {
-    common::error_convert(ptrace::trace_me())?;
-    limit::limit_memtime(mem_limit, time_limit)?;
-    filter::filter_syscalls(&[])
+fn execute_with_err(bin: &String, args: &Vec<String>) -> Result<Infallible, String> {
+    /* execve() needs `CStr`s and $PATH, and it's needed twice, 
+     * so it's pulled off into this function.
+     */
+    // Turn everything into `CString`s.
+    let cstr_bin = error_convert( CString::new(bin.as_str()) )?;
+    let cstr_args = error_convert(
+        args.iter()
+        .map(|x| CString::new(x.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+    )?;
+    let cstr_path = error_convert( CString::new("PATH=".to_string() + env!("PATH")) )?;
+    // Call execve.
+    error_convert(
+        execve(
+            cstr_bin.as_c_str(),
+            &(cstr_args.iter().map(|x| x.as_c_str()).collect::<Vec<&CStr>>()),
+            &[cstr_path.as_c_str()]
+        )
+    )
 }
 
 /* Will not return unless there is an error. */
-fn setup_child_compiler(bin: &String, args: &Vec<String>, conn: RawFd) -> String {
-    if let Err(p) = link::reroute_link(conn, 2) { return p; }
-    if let Err(p) = limit::limit_memtime(rlimit::RLIM_INFINITY, 3) { return p; }
-    if let Err(p) = filter::filter_syscalls(&[SYS_vfork, SYS_fork, SYS_clone]) { return p; }
-    let cstr_bin = match CString::new(bin.as_str()) { Ok(p) => p, Err(e) => { return e.to_string(); }};
-    let cstr_args = match args.iter().map(|x| CString::new(x.as_str())).collect::<Result<Vec<CString>, _>>() {
-        Ok(p) => p,
-        Err(e) => { return e.to_string(); }
-    };
-    let cstr_path = match CString::new("PATH=".to_string() + env!("PATH")) { Ok(p) => p, Err(e) => { return e.to_string(); } };
-    let err = execve(
-        cstr_bin.as_c_str(),
-        &(cstr_args.iter().map(|x| x.as_c_str()).collect::<Vec<&CStr>>()),
-        &[cstr_path.as_c_str()]
-    ).unwrap_err();
+fn setup_child_compiler(bin: &String, args: &Vec<String>, conn: RawFd) -> Result<Infallible, String> {
+    link::reroute_link(conn, 2)?; // reroute stderr to link
+    limit::limit_memtime(rlimit::RLIM_INFINITY, 3)?;
+    filter::filter_syscalls(&[SYS_vfork, SYS_fork, SYS_clone])?;
     // if it passed the execve it definitely errored
-    format!("could not launch compiler: {}", err)
+    let err = execute_with_err(bin, args).unwrap_err();
+    Err(format!("could not execute with error {}", err))
 }
 
 /* Runs the arguments given as a compiler - 3 second maximum time, no maximum memory.
@@ -44,7 +51,7 @@ pub fn compile(bin: String, args: Vec<String>) -> Result<u64, String> {
             let conn = link::read_side(conn_both);
             // wait for child to exit
             let child_start_time = Instant::now();
-            let res = common::error_convert(ptrace::wait_with_sig())?;
+            let res = error_convert(trace::wait_with_sig())?;
             let mut buf = vec![0u8; 4096];
             let _ = link::close_side(link::write_side(conn_both));
             let nr_read = link::read_link(conn, &mut buf)?;
@@ -73,11 +80,10 @@ pub fn compile(bin: String, args: Vec<String>) -> Result<u64, String> {
         },
         Ok(ForkResult::Child) => {
             let conn = link::write_side(conn_both);
-            let err = setup_child_compiler(&bin, &args, conn);
+            let err = setup_child_compiler(&bin, &args, conn).unwrap_err();
             // if the above returned, it definitely errored
             // there's not much we can do about the link failing anyway; so ignore the result
-            // let _ = link::write_link(conn, format!("failed to execute: {}", err).as_bytes());
-            let _ = link::write_link(conn, format!("failed to execute: {}", err).as_bytes());
+            let _ = link::write_link(conn, format!("failed to launch compiler: {}", err).as_bytes());
             let _ = link::close_side(conn);
             exit(EXIT_CODE_FAILED_EXEC);
         },
@@ -85,27 +91,30 @@ pub fn compile(bin: String, args: Vec<String>) -> Result<u64, String> {
     }
 }
 
+fn setup_gradee(bin: &String, args: &Vec<String>, mem_limit: u64, time_limit: u64) -> Result<Infallible, String> {
+    error_convert(trace::trace_me())?;
+    limit::limit_memtime(mem_limit, time_limit)?;
+    filter::filter_syscalls(&[])?;
+    // if it passed this, it definitely errored
+    execute_with_err(bin, args)
+}
+
 /* Runs the arguments given as a submission with `time_limit` and `mem_limit`. */
-pub fn exec(bin: String, args: Vec<String>, time_limit: u64, mem_limit: u64) -> ProcState {
+
+pub fn exec(bin: String, args: Vec<String>, time_limit: u64, mem_limit: u64) -> Result<ProcState, String> {
+    let (_, writer) = link::init_link_flag(OFlag::O_CLOEXEC)?;
     match fork() {
         Ok(ForkResult::Parent { child }) => {
-            ptrace::track_process(child)
+            Ok(trace::track_process(child))
         },
         Ok(ForkResult::Child) => {
-            match limit_myself(mem_limit, time_limit) {
-                Err(_) => exit(EXIT_CODE_FAILED_EXEC),
-                Ok(_) => {}
-            }
-            Command::new(bin)
-                .args(args)
-                .exec();
-            // definitely errored
+            // if this returns, it definitely errored
+            let err = setup_gradee(&bin, &args, mem_limit, time_limit).unwrap_err();
+            // try to write it to link, but if it fails there's nothing we can do
+            let _ = link::write_link(writer, format!("failed to launch submission: {}", err).as_bytes());
+            let _ = link::close_side(writer);
             exit(EXIT_CODE_FAILED_EXEC);
         },
-        Err(_) => ProcState {
-            max_mem: 0,
-            max_time: 0,
-            verdict: Verdict::FailedExec
-        }
+        Err(_) => Err("failed to fork".to_string())
     }
 }
