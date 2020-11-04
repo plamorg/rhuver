@@ -4,10 +4,10 @@ mod trace;
 mod limit;
 mod link;
 mod common;
-use proc_data::*;
+pub use proc_data::*;
 use common::error_convert;
 
-use nix::{unistd::{fork, ForkResult, execve}, libc::{SYS_vfork, SYS_fork, SYS_clone}, fcntl::OFlag};
+use nix::{unistd::{alarm, fork, ForkResult, execve}, libc::{SYS_vfork, SYS_fork, SYS_clone}, fcntl::OFlag};
 use std::{time::Instant, os::unix::io::RawFd, process::exit, ffi::{CString, CStr}, convert::Infallible};
 
 fn execute_with_err(bin: &String, args: &Vec<String>) -> Result<Infallible, String> {
@@ -47,15 +47,18 @@ fn setup_child_compiler(bin: &String, args: &Vec<String>, conn: RawFd) -> Result
 pub fn compile(bin: String, args: Vec<String>) -> Result<u64, String> {
     let conn_both = link::init_link()?;
     match fork() {
-        Ok(ForkResult::Parent { child: _ }) => {
+        Ok(ForkResult::Parent { child: pid }) => {
             let conn = link::read_side(conn_both);
             // wait for child to exit
             let child_start_time = Instant::now();
-            let res = error_convert(trace::wait_with_sig())?;
+            let mut res;
+            while {
+                res = error_convert(trace::wait_with_sig(true, pid))?;
+                res == Verdict::Running
+            } {};
             let mut buf = vec![0u8; 4096];
             let _ = link::close_side(link::write_side(conn_both));
             let nr_read = link::read_link(conn, &mut buf)?;
-            println!("{}", nr_read);
             buf.resize(nr_read, 0);
             let msg = String::from_utf8_lossy(&buf).to_string();
             match res {
@@ -100,12 +103,11 @@ fn setup_gradee(bin: &String, args: &Vec<String>, mem_limit: u64, time_limit: u6
 }
 
 /* Runs the arguments given as a submission with `time_limit` and `mem_limit`. */
-
 pub fn exec(bin: String, args: Vec<String>, time_limit: u64, mem_limit: u64) -> Result<ProcState, String> {
-    let (_, writer) = link::init_link_flag(OFlag::O_CLOEXEC)?;
+    let (reader, writer) = link::init_link_flag(OFlag::O_CLOEXEC)?;
     match fork() {
         Ok(ForkResult::Parent { child }) => {
-            Ok(trace::track_process(child))
+            Ok(trace::track_process(child, reader, time_limit, mem_limit))
         },
         Ok(ForkResult::Child) => {
             // if this returns, it definitely errored

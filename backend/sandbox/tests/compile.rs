@@ -10,5 +10,5 @@ fn compile_test_success() {
 #[test]
 fn compile_test_fail() {
     let path: String = env!("CARGO_MANIFEST_DIR").to_string() + "/tests/compile.rs";
-    sandbox::compile("/usr/bin/g++".to_string(), vec!["g++", "-std=c++17", "-O2", "-w", &path, "-o", "test"].iter().map(|x| x.to_string()).collect::<Vec<String>>()).unwrap_err();
+    sandbox::compile("/usr/bin/g++".to_string(), vec!["g++", "-std=c++17", "-O2", "-w", &path, "-o", "test_fail.x86_64"].iter().map(|x| x.to_string()).collect::<Vec<String>>()).unwrap_err();
 }

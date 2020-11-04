@@ -50,12 +50,12 @@ pub enum Verdict {
     // non-zero exit code
     Nzec(i32),
     Ok,
-    Running
+    Running,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct ProcState {
     pub verdict: Verdict,
-    pub max_time: u64,
+    pub max_time_ms: u64,
     pub max_mem: u64,
 }
